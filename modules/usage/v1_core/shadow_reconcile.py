@@ -1,8 +1,8 @@
 from xray_common import normalize_user
 SOURCES = (
-    ('fair-light-1/xray-main', 'main', 'last_counters', ['California']),
-    ('fair-light-1/xhttp443', 'xhttp443', 'xhttp443_last_counters', ['California']),
-    ('fair-light-1/hy2-udp443', 'hy2', 'hy2_last_counters', ['California']),
+    ('fair-light-1/xray-main', 'main', 'last_counters', ['*']),
+    ('fair-light-1/xhttp443', 'xhttp443', 'xhttp443_last_counters', ['*']),
+    ('fair-light-1/hy2-udp443', 'hy2', 'hy2_last_counters', ['*']),
 )
 
 def canonical(raw):

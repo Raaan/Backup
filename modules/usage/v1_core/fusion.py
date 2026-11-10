@@ -49,7 +49,8 @@ def resolve(db, source_id, raw_identity, trusted_prefixes):
             account_id = row[0]
             break
 
-    # Infer only from configured, trusted source prefixes.
+    # A trusted adapter may allow all nonempty server labels with '*'.
+    # Labels before the comma do not distinguish canonical people.
     if account_id is None and "," in clean:
         prefix, person = clean.rsplit(",", 1)
         prefix = prefix.strip()
@@ -60,7 +61,7 @@ def resolve(db, source_id, raw_identity, trusted_prefixes):
         }
 
         if (
-            prefix.casefold() in permitted
+            prefix and ('*' in permitted or prefix.casefold() in permitted)
             and PERSON.fullmatch(person)
         ):
             row = db.execute("""

@@ -15,12 +15,13 @@ STATE = Path("/var/lib/xray-usage/current.json")
 
 sys.path.insert(0, str(B / "v1_core"))
 from counter_engine import ingest, utc
+from fusion import resolve
 from shadow_reconcile import SOURCES, canonical, source_counters
 
 def totals(state):
     result = defaultdict(lambda: [0, 0])
     for raw, data in state["users"].items():
-        key = canonical(raw)
+        key = canonical(raw).casefold()
         for i, direction in enumerate(("uplink", "downlink")):
             value = data.get(direction, 0)
             if type(value) is not int or value < 0:
@@ -34,7 +35,7 @@ def totals(state):
 def check(db, state, period):
     expected = totals(state)
     actual = {
-        name: (up, down)
+        name.casefold(): (up, down)
         for name, up, down in db.execute("""
             SELECT canonical_name,upload_bytes,download_bytes
             FROM v1_account_period WHERE period_id=?
@@ -118,6 +119,10 @@ def run():
                           AND direction=?
                     """, (sid, raw, direction)).fetchone()
                     if not exists:
+                        # The FK parent must exist before seeding a new counter.
+                        # Resolve in the staged copy so failed reconciliation
+                        # leaves the live database untouched.
+                        resolve(staged, sid, raw, prefixes)
                         staged.execute("""
                             INSERT INTO source_counter_state
                             (source_id,raw_identity,direction,
