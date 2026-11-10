@@ -4,11 +4,28 @@ import getpass
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
 
 from scripts.setup import prompt
+
+def email_address(label, default=''):
+    while True:
+        value = prompt(label, default)
+        if re.fullmatch(r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}', value):
+            return value
+        print('Enter one complete email address, for example name@gmail.com. Please try again.')
+
+
+def application_password():
+    while True:
+        # Google displays the 16-character password in space-separated groups.
+        value = getpass.getpass('Gmail application password (16 characters, hidden): ').replace(' ', '')
+        if len(value) == 16 and value.isascii() and value.isalnum():
+            return value
+        print('Enter the 16-character Google application password. Please try again.')
 
 def atomic(path, text, mode=0o600):
     path = pathlib.Path(path)
@@ -39,10 +56,10 @@ def install(root):
         raise ValueError('Install and verify the base stack first')
     if not pathlib.Path('/var/lib/xray-usage-v1/usage.db').is_file():
         raise ValueError('V1 baseline must exist before mail installation')
-    sender = prompt('Gmail sending address')
+    sender = email_address('Gmail sending address')
     c = {'host':'smtp.gmail.com','port':587,'user':sender,'from':sender,
-         'password':getpass.getpass('Gmail application password (hidden): '),
-         'to':prompt('Weekly report recipient',sender)}
+         'password':application_password(),
+         'to':email_address('Weekly report recipient',sender)}
     text = smtp_config(c)
     subprocess.run(['apt-get','install','-y','msmtp'],check=True,env=dict(os.environ,DEBIAN_FRONTEND='noninteractive'))
     units = pathlib.Path('/etc/systemd/system')
