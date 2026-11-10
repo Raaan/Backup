@@ -241,7 +241,8 @@ class DeploymentTests(unittest.TestCase):
             import datetime
             tree=ast.parse((ROOT/'modules/usage/monthly.py').read_text(encoding='utf-8-sig'))
             functions=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in ('active','validate','transition')]
-            namespace={'datetime':datetime.datetime,'MAIN':'fair-light-1/xray-main'}
+            from lifecycle import retire_absent
+            namespace={'datetime':datetime.datetime,'MAIN':'fair-light-1/xray-main','retire_absent':retire_absent}
             exec(compile(ast.Module(body=functions,type_ignores=[]),'monthly-functions','exec'),namespace)
             with sqlite3.connect(folder/'stage/usage.db') as conn:
                 namespace['transition'](conn,sample['last_updated'],'2026-12-08T00:10:00+00:00')

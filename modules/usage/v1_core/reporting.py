@@ -30,11 +30,14 @@ class Reporting:
 
     def accounts(self, period):
         return self.rows("""
-            SELECT account_id,canonical_name,
-                   upload_bytes,download_bytes,total_bytes
-            FROM v1_account_period
-            WHERE period_id=?
-            ORDER BY canonical_name COLLATE NOCASE
+            SELECT v.account_id,v.canonical_name,
+                   v.upload_bytes,v.download_bytes,v.total_bytes
+            FROM v1_account_period v
+            JOIN accounts a ON a.account_id=v.account_id
+            WHERE v.period_id=? AND (a.status='active' OR v.total_bytes>0 OR
+                EXISTS (SELECT 1 FROM billing_periods p
+                        WHERE p.period_id=v.period_id AND p.ended_at_utc IS NOT NULL))
+            ORDER BY v.canonical_name COLLATE NOCASE
         """, (period,))
 
     def hourly(self, period):
@@ -109,6 +112,7 @@ class Reporting:
              AND julianday(h.hour_start_utc)>=julianday(?)
              AND julianday(h.hour_start_utc)<julianday(?)
             GROUP BY a.account_id,a.canonical_name
+            HAVING a.status='active' OR COALESCE(SUM(h.total_bytes),0)>0
             ORDER BY a.canonical_name COLLATE NOCASE
         """, (begin_s, end_s))
 

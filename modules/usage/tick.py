@@ -36,4 +36,5 @@ with open('/var/lock/xray-usage.lock', 'a') as lock:
 sys.path.insert(0, str(B/'v1_core'))
 sys.path.insert(0, '/root')
 from live_ingest import run
-run()
+from lifecycle import read_inventory
+run(inventory=read_inventory())

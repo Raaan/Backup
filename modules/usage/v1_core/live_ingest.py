@@ -64,7 +64,7 @@ def check(db, state, period):
         raise RuntimeError("Foreign key failure")
     return sum(sum(v) for v in actual.values())
 
-def run():
+def run(inventory=None):
     state = json.loads(STATE.read_text())
     stamp = state["last_updated"]
     period = state["period_started"]
@@ -105,6 +105,9 @@ def run():
             staged = sqlite3.connect(temp, timeout=30)
             src.backup(staged)
             staged.execute("PRAGMA foreign_keys=ON")
+            if inventory is not None:
+                from lifecycle import synchronize
+                synchronize(staged, period, inventory)
 
             # New identities start from zero, matching legacy collection.
             # All writes here affect the temporary database only.
@@ -180,4 +183,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-

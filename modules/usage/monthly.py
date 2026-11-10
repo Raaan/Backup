@@ -14,6 +14,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 sys.path.insert(0, "/opt/la-portal/v1_core")
 from billing import load as load_billing
+from lifecycle import read_inventory, retire_absent
 
 BASE = Path("/opt/la-portal")
 DB = Path("/var/lib/xray-usage-v1/usage.db")
@@ -93,7 +94,7 @@ def ingest_from(path):
     if Path(runner.__globals__["DB"]) != DB:
         raise RuntimeError("Live ingester uses another database")
     runner.__globals__["STATE"] = path
-    runner()
+    runner(inventory=read_inventory() if path == STATE else None)
 
 def transition(db, old, new):
     if datetime.fromisoformat(new) <= datetime.fromisoformat(old):
@@ -123,6 +124,7 @@ def transition(db, old, new):
         """, (new, new))
 
         # Only Main is reset by the legacy monthly reset.
+        retire_absent(db, new)
         # XHTTP/HY2 must retain their existing counter baselines.
         db.execute("""
             UPDATE source_counter_state
