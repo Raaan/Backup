@@ -1,0 +1,14 @@
+# Machine secrets and generated files never belong in Git.
+private/
+*.private.json
+*.pem
+*.key
+*.db
+*.db-*
+*.eml
+*.zip
+*.tar.gz
+__pycache__/
+*.pyc
+.stage/
+.cache/

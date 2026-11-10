@@ -1,0 +1,24 @@
+{
+  "server_id": "california-01",
+  "host": "__NEW_PUBLIC_IP_OR_DOMAIN__",
+  "tls_name": "__SAME_IP_OR_DOMAIN__",
+  "reality_sni": "__REACHABLE_TLS_TARGET__",
+  "reality_target": "__REACHABLE_TLS_TARGET__:443",
+  "users": [
+    "Owner"
+  ],
+  "certificate": {
+    "mode": "acme",
+    "email": "__ACME_CONTACT_EMAIL__",
+    "agree_tos": false
+  },
+  "enable_monthly": true,
+  "billing": {
+    "day": 8,
+    "time": "00:10",
+    "timezone": "UTC",
+    "quota": "1000",
+    "unit": "GiB",
+    "factor": "2"
+  }
+}
