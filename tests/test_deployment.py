@@ -12,7 +12,7 @@ from types import SimpleNamespace
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 import portal
-from scripts import certificates, mail_test, mail_setup
+from scripts import certificates, mail_test, mail_setup, setup
 sys.path.insert(0,str(ROOT/'modules/usage/v1_core'))
 from counter_engine import ingest
 from reporting import Reporting
@@ -20,6 +20,50 @@ from modules.usage.v1_core import billing
 from scripts import billing_update
 
 class DeploymentTests(unittest.TestCase):
+    def test_setup_retries_invalid_timezone_before_quota_and_saves_configuration(self):
+        answers = ['owner@example.com', 'test-01', 'dl.google.com',
+                   'zerouser', '10', '', '+8', 'UTC', '600', 'GB', '1', 'YES']
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp)/'profile.json'
+            with mock.patch.object(setup, 'detect_public_ipv4', return_value='192.0.2.1'), \
+                 mock.patch('builtins.input', side_effect=answers), mock.patch('builtins.print') as output:
+                setup.configure(path)
+            c = json.loads(path.read_text())
+            self.assertEqual(c['billing'], {'day':10, 'time':'00:10', 'timezone':'UTC',
+                                           'quota':'600', 'unit':'GB', 'factor':'1'})
+            self.assertEqual(c['users'], ['zerouser'])
+            self.assertEqual(c['host'], '192.0.2.1')
+            self.assertEqual(c['tls_name'], c['host'])
+            self.assertTrue(any('Please enter this field again' in str(call) for call in output.call_args_list))
+
+    def test_public_ip_discovery_rejects_private_and_disagreeing_addresses(self):
+        def response(value):
+            r = mock.MagicMock()
+            r.__enter__.return_value.read.return_value = value.encode('ascii')
+            return r
+        with mock.patch.object(setup.urllib.request, 'build_opener') as build:
+            opener = build.return_value
+            opener.open.side_effect = [response('8.8.8.8'), response('8.8.8.8')]
+            self.assertEqual(setup.detect_public_ipv4(), '8.8.8.8')
+            opener.open.side_effect = [response('8.8.8.8'), response('1.1.1.1')]
+            self.assertIsNone(setup.detect_public_ipv4())
+            opener.open.side_effect = [response('10.0.0.1'), OSError('timeout')]
+            self.assertIsNone(setup.detect_public_ipv4())
+            opener.open.side_effect = [OSError('timeout'), response('8.8.8.8')]
+            self.assertEqual(setup.detect_public_ipv4(), '8.8.8.8')
+
+    def test_setup_falls_back_to_manual_host_when_discovery_fails(self):
+        answers = ['192.0.2.1', 'owner@example.com', '', 'dl.google.com',
+                   '', '', '', '', '', '', '', 'YES']
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp)/'profile.json'
+            with mock.patch.object(setup, 'detect_public_ipv4', return_value=None), \
+                 mock.patch('builtins.input', side_effect=answers), mock.patch('builtins.print'):
+                setup.configure(path)
+            c = json.loads(path.read_text())
+            self.assertEqual(c['host'], '192.0.2.1')
+            self.assertEqual(c['tls_name'], c['host'])
+
     def test_billing_policy_calendar_units_and_invalid_inputs(self):
         c=billing.normalize({'day':17,'time':'08:30','timezone':'UTC','quota':'500','unit':'GB','factor':'1.5'})
         self.assertEqual(billing.calendar(c),'*-*-17 08:30:00 UTC')

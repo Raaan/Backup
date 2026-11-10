@@ -3,7 +3,7 @@ import json
 import re
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 CONFIG = Path('/etc/la-portal/billing.json')
 DEFAULT = {'day':8, 'time':'00:10', 'timezone':'UTC',
@@ -19,7 +19,10 @@ def normalize(value):
         raise ValueError('Billing time must be HH:MM')
     if not isinstance(c['timezone'],str) or not re.fullmatch(r'[A-Za-z0-9_+./-]+',c['timezone']):
         raise ValueError('Invalid billing timezone')
-    ZoneInfo(c['timezone'])
+    try:
+        ZoneInfo(c['timezone'])
+    except ZoneInfoNotFoundError:
+        raise ValueError('Unknown timezone; use an installed IANA name such as UTC or Asia/Hong_Kong, not +8') from None
     if c['unit'] not in ('GB','GiB'):
         raise ValueError('Quota unit must be GB or GiB')
     for key in ('quota','factor'):
