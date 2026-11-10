@@ -28,7 +28,7 @@ def detect_public_ipv4():
 
 def billing_prompt():
     from modules.usage.v1_core.billing import normalize
-    policy = normalize({})
+    policy = normalize({'timezone': 'Asia/Hong_Kong'})
     fields = (
         ('day', 'Monthly settlement day (1-28)'),
         ('time', 'Settlement time HH:MM'),

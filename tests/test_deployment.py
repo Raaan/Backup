@@ -63,6 +63,7 @@ class DeploymentTests(unittest.TestCase):
             c = json.loads(path.read_text())
             self.assertEqual(c['host'], '192.0.2.1')
             self.assertEqual(c['tls_name'], c['host'])
+            self.assertEqual(c['billing']['timezone'], 'Asia/Hong_Kong')
 
     def test_billing_policy_calendar_units_and_invalid_inputs(self):
         c=billing.normalize({'day':17,'time':'08:30','timezone':'UTC','quota':'500','unit':'GB','factor':'1.5'})
