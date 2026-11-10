@@ -16,18 +16,25 @@ from openpyxl.styles import Font, Alignment
 from openpyxl.utils import get_column_letter
 
 B = Path("/opt/la-portal")
-sys.path.insert(0, str(B / "v1_core"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from reporting import Reporting
 
 DATABASE = Path("/var/lib/xray-usage-v1/usage.db")
 OUT = B / "output-friday-v1"
-OUT.mkdir(mode=0o700, exist_ok=True)
 
-GIB = 1024 ** 3
 BJ = timezone(timedelta(hours=8))
 
-def gb(value):
-    return round(int(value) / GIB, 6)
+def volume(value, unit):
+    if unit not in ('GB', 'GiB'):
+        raise ValueError('Unknown traffic unit')
+    return int(value) / (1000 ** 3 if unit == 'GB' else 1024 ** 3)
+
+
+def display_volume(value, unit):
+    amount = volume(value, unit)
+    if 0 < amount < 0.000001:
+        return f"<0.000001 {unit} ({int(value)} B)"
+    return f"{amount:.6f} {unit}"
 
 def beijing(value):
     return datetime.fromisoformat(value).astimezone(BJ).strftime(
@@ -52,12 +59,14 @@ def pivot_hourly(rows):
 def workbook(path, summary_title, chart_title, accounts,
              hours, hourly_rows, monthly, extra_bytes=0,
              weekly_window=None):
+    unit = monthly["quota_unit"]
+    gb = lambda value: volume(value, unit)
     wb = Workbook()
     ws = wb.active
     ws.title = summary_title
 
     headers = [
-        "User", "Upload GiB", "Download GiB", "Total GiB",
+        "User", f"Upload {unit}", f"Download {unit}", f"Total {unit}",
         "Upload Bytes", "Download Bytes", "Total Bytes"
     ]
     ws.append(headers)
@@ -89,7 +98,7 @@ def workbook(path, summary_title, chart_title, accounts,
 
     chart = BarChart()
     chart.title = chart_title
-    chart.y_axis.title = "GiB"
+    chart.y_axis.title = unit
     chart.x_axis.title = "User"
     chart.add_data(
         Reference(
@@ -110,7 +119,7 @@ def workbook(path, summary_title, chart_title, accounts,
 
     wh = wb.create_sheet("Hourly Usage")
     names = [a["canonical_name"] for a in accounts]
-    wh.append(["Beijing Time"] + names + ["Total GiB"])
+    wh.append(["Beijing Time"] + names + [f"Total {unit}"])
 
     by_hour = pivot_hourly(hourly_rows)
 
@@ -131,7 +140,7 @@ def workbook(path, summary_title, chart_title, accounts,
             if weekly_window else
             "Hourly Traffic - Billing Period"
         )
-        line.y_axis.title = "GiB"
+        line.y_axis.title = unit
         line.x_axis.title = "Beijing Time"
         line.add_data(
             Reference(
@@ -157,26 +166,26 @@ def workbook(path, summary_title, chart_title, accounts,
     wm.append(["Period start", monthly["period_id"]])
     wm.append(["Period end (snapshot UTC)", monthly["report_snapshot_utc"]])
     wm.append(["Billing period", monthly["period_id"]])
-    wm.append(["Allocated GiB", gb(monthly["allocated_bytes"])])
+    wm.append([f"Allocated {unit}", gb(monthly["allocated_bytes"])])
     wm.append([
-        "Historical baseline GiB",
+        f"Historical baseline {unit}",
         gb(monthly["unallocated"]["historical_baseline_bytes"])
     ])
     wm.append([
-        "Pending identity GiB",
+        f"Pending identity {unit}",
         gb(monthly["unallocated"]["pending_identity_bytes"])
     ])
     wm.append([
-        "Monthly user traffic total GiB",
+        f"Monthly user traffic total {unit}",
         gb(monthly["monthly_total_bytes"])
     ])
     wm.append([
-        "Estimated VPS bandwidth x"+monthly["billing_factor"]+" GiB",
+        "Estimated VPS bandwidth x"+monthly["billing_factor"]+" "+unit,
         gb(monthly["estimated_vps_bytes"])
     ])
-    wm.append(["Quota GiB", gb(monthly["quota_bytes"])])
-    wm.append(["Remaining GiB", gb(monthly["remaining_bytes"])])
-    wm.append(["Current persisted traffic GiB", gb(monthly["allocated_bytes"] + monthly["unallocated"]["pending_identity_bytes"])])
+    wm.append([f"Quota {unit}", gb(monthly["quota_bytes"])])
+    wm.append([f"Remaining {unit}", gb(monthly["remaining_bytes"])])
+    wm.append([f"Current persisted traffic {unit}", gb(monthly["allocated_bytes"] + monthly["unallocated"]["pending_identity_bytes"])])
     wm.append(["Usage percent", round(monthly["estimated_vps_bytes"] * 100 / monthly["quota_bytes"], 3)])
 
     if weekly_window:
@@ -198,14 +207,22 @@ def workbook(path, summary_title, chart_title, accounts,
                 get_column_letter(idx)
             ].width = 19
 
+    # Nine decimals retain byte-scale traffic; raw byte columns remain exact.
+    for row in ws.iter_rows(min_row=2, min_col=2, max_col=4):
+        for cell in row:
+            cell.number_format = '0.000000000'
+    for row in wh.iter_rows(min_row=2, min_col=2):
+        for cell in row:
+            cell.number_format = '0.000000000'
     wb.save(path)
 
-def make_csv(path, accounts, extra_bytes=0):
+def make_csv(path, accounts, extra_bytes=0, unit="GiB"):
+    gb = lambda value: volume(value, unit)
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
         w.writerow([
             "User", "Upload Bytes", "Download Bytes",
-            "Total Bytes", "Total GiB"
+            "Total Bytes", f"Total {unit}"
         ])
         for a in accounts:
             w.writerow([
@@ -227,7 +244,43 @@ def make_csv(path, accounts, extra_bytes=0):
             gb(total + extra_bytes)
         ])
 
+def email_body(week_accounts, week, month, weekly_total, week_pending):
+    unit = month["quota_unit"]
+    lines = [
+        "Xray Weekly Usage Report - OFFLINE PREVIEW",
+        "",
+        f"Start UTC: {week['start_utc']}",
+        f"End UTC (exclusive): {week['end_utc_exclusive']}",
+        "",
+        "Weekly traffic summary:",
+        ""
+    ]
+    for account in week_accounts:
+        lines.append(
+            f"{account['canonical_name']:<12} "
+            f"{display_volume(account['total_bytes'], unit)}"
+        )
+    lines += [
+        "",
+        f"Weekly allocated total: {display_volume(weekly_total, unit)}",
+        f"Weekly pending: {display_volume(week_pending, unit)}",
+        "",
+        f"Billing period: {month['period_id']}",
+        f"Monthly user traffic: "
+        f"{display_volume(month['monthly_total_bytes'], unit)}",
+        f"Estimated VPS bandwidth x{month['billing_factor']}: "
+        f"{display_volume(month['estimated_vps_bytes'], unit)}",
+        f"Remaining quota: "
+        f"{display_volume(month['remaining_bytes'], unit)}",
+        "",
+        "PREVIEW ONLY - NOT SENT"
+    ]
+
+    return "\n".join(lines)
+
+
 def main():
+    OUT.mkdir(mode=0o700, exist_ok=True)
     before = hashlib.sha256(DATABASE.read_bytes()).hexdigest()
     r = Reporting(DATABASE)
     try:
@@ -306,48 +359,18 @@ def main():
         )
 
         make_csv(
-            files["weekly_csv"], week_accounts, week_pending
+            files["weekly_csv"], week_accounts, week_pending, unit=month["quota_unit"]
         )
         make_csv(
-            files["monthly_csv"], month_accounts, monthly_extra
+            files["monthly_csv"], month_accounts, monthly_extra, unit=month["quota_unit"]
         )
 
         weekly_up, weekly_down, weekly_total = totals(
             week_accounts
         )
-        lines = [
-            "Xray Weekly Usage Report - OFFLINE PREVIEW",
-            "",
-            f"Start UTC: {week['start_utc']}",
-            f"End UTC (exclusive): {week['end_utc_exclusive']}",
-            "",
-            "Weekly traffic summary:",
-            ""
-        ]
-        for account in week_accounts:
-            lines.append(
-                f"{account['canonical_name']:<12} "
-                f"{gb(account['total_bytes']):>12.3f} GiB"
-            )
-        lines += [
-            "",
-            f"Weekly allocated total: {gb(weekly_total):.3f} GiB",
-            f"Weekly pending: {gb(week_pending):.3f} GiB",
-            "",
-            f"Billing period: {month['period_id']}",
-            f"Monthly user traffic: "
-            f"{gb(month['monthly_total_bytes']):.3f} GiB",
-            f"Estimated VPS bandwidth x{month['billing_factor']}: "
-            f"{gb(month['estimated_vps_bytes']):.3f} GiB",
-            f"Remaining quota: "
-            f"{gb(month['remaining_bytes']):.3f} GiB",
-            "",
-            "PREVIEW ONLY - NOT SENT"
-        ]
-
         msg = EmailMessage()
         msg["Subject"] = "PREVIEW - Xray Weekly Usage Report"
-        msg.set_content("\n".join(lines))
+        msg.set_content(email_body(week_accounts, week, month, weekly_total, week_pending))
         msg.add_attachment(
             files["weekly_xlsx"].read_bytes(),
             maintype="application",
