@@ -52,7 +52,7 @@ class LiveIngestTests(unittest.TestCase):
             before = dbpath.read_bytes()
             with mock.patch.multiple(live_ingest, DB=dbpath, STATE=state), mock.patch('builtins.print'):
                 if unmapped:
-                    with self.assertRaisesRegex(RuntimeError, 'Unmapped traffic'):
+                    with self.assertRaisesRegex(RuntimeError, 'V1_ACCOUNT_RECONCILIATION_FAILED'):
                         live_ingest.run()
                     self.assertEqual(dbpath.read_bytes(), before)
                     return
@@ -86,3 +86,4 @@ class LiveIngestTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
