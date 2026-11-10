@@ -13,7 +13,7 @@ B = Path("/opt/la-portal")
 DB = Path("/var/lib/xray-usage-v1/usage.db")
 STATE = Path("/var/lib/xray-usage/current.json")
 
-sys.path.insert(0, str(B / "v1_core"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from counter_engine import ingest, utc
 from fusion import resolve
 from shadow_reconcile import SOURCES, canonical, source_counters
@@ -180,3 +180,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+
