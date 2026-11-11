@@ -32,8 +32,3 @@ The current build passed 34 automated tests on Ubuntu, along with protocol and t
 
 This repository is primarily a personal backup. Detailed setup, operations, and maintenance records remain private.
 
-- [Release notes](RELEASE_NOTES.md)
-- [Version history](CHANGELOG.md)
-- [Previous description](docs/archive/README.previous.md)
-
-Built around [Xray-core](https://github.com/XTLS/Xray-core), [Hysteria](https://github.com/apernet/hysteria), and [Certbot](https://github.com/certbot/certbot). Their respective licenses apply to those components.
