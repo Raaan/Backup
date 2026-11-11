@@ -12,6 +12,6 @@ The v0.0.x numbers below retrospectively label actual development milestones. Th
 | v0.0.6 | Fixed GB/GiB reporting conversion and labels; improved small-traffic display. Byte counters and quota calculations remained correct. |
 | v0.1.0 | Packaged the working baseline, added a brief English overview and installation instructions, and published the first Release. |
 
-The latest verified baseline passed 34 Ubuntu tests and test-VPS protocol, ingestion, database-integrity, and monthly-simulation checks. Natural monthly rollover and certificate replacement at expiry still require observation.
+The latest verified baseline passed 34 Ubuntu tests and test-environment protocol, ingestion, database-integrity, and monthly-simulation checks. Natural monthly rollover and certificate replacement at expiry still require observation.
 
 Detailed diagnosis, recovery procedures, and operational records remain private.
