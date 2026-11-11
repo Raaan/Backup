@@ -8,6 +8,22 @@ This project grew out of a VPS setup I have used and maintained for several year
 
 After the blocking I experienced last month, I decided to keep the project on GitHub so that the code and maintenance work would be easier to preserve and recover.
 
+## Installation
+
+Use a fresh Ubuntu 22.04 or 24.04 amd64 VPS. Log in as root and run each command separately:
+
+```bash
+apt-get update
+apt-get install -y git python3 ca-certificates openssl iproute2
+git clone https://github.com/Raaan/Backup.git /root/LA_Portal
+cd /root/LA_Portal
+bash install.sh
+```
+
+Allow TCP 80, 443 and 8443, plus UDP 443; keep your SSH port accessible. Follow the installer prompts. Email is optional and configured separately.
+
+After verifying real client connections and traffic accounting, run `python3 portal.py activate --apply --clients-verified` from the installation directory.
+
 ## Current version
 
 **v0.1.0** brings the existing setup into a modular project, with improvements to installation, user accounting, reporting, certificates, and optional email delivery.
