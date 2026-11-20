@@ -196,6 +196,12 @@ class DeploymentTests(unittest.TestCase):
             self.assertNotIn('allowInsecure',query)
             self.assertTrue((stage/'etc/hy2-udp443/accounts.private.json').exists())
             self.assertTrue((stage/'opt/vps-modules/userm/1.0.1/userm.py').exists())
+            updater = stage/'opt/la-portal/scripts/xrayupdate'
+            self.assertEqual(manifest['files']['/opt/la-portal/scripts/xrayupdate']['mode'], 0o755)
+            self.assertEqual(updater.read_bytes(), (ROOT/'scripts/xrayupdate').read_bytes())
+            self.assertEqual((updater.parent/'core_update.py').read_bytes(), (ROOT/'scripts/core_update.py').read_bytes())
+            help_output = subprocess.check_output([sys.executable, str(updater), '--help'], cwd=folder, text=True)
+            self.assertIn('--check', help_output)
             with self.assertRaises(FileExistsError):portal.stage(c,stage)
             c['users']=['Owner','owner']
             config.write_text(json.dumps(c))

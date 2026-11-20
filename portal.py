@@ -131,6 +131,8 @@ def stage(c, destination):
     put('/etc/hy2-udp443/collection-enabled','')
     put('/etc/userm/settings.json',{'host':c['host'],'endpoints':{'xray-xhttp443.service:XHTTP443':{'host':c['host'],'sni':c['tls_name']}}})
     copy('modules/userm/userm.py','/opt/vps-modules/userm/1.0.1/userm.py',0o755)
+    copy('scripts/xrayupdate','/opt/la-portal/scripts/xrayupdate',0o755)
+    copy('scripts/core_update.py','/opt/la-portal/scripts/core_update.py')
     copy('modules/usage/collector.py','/root/xray-usage-collect.py',0o700)
     copy('modules/usage/xray_common.py','/root/xray_common.py')
     copy('modules/usage/monthly.py','/root/xray-v1-monthly-v2.py',0o700)
@@ -177,7 +179,7 @@ def preflight(managed_acme=False):
     if platform.machine() not in ('x86_64','amd64'):raise ValueError('This release supports amd64 only')
     release=pathlib.Path('/etc/os-release').read_text()
     if 'ID=ubuntu' not in release or not any(v in release for v in ('22.04','24.04')):raise ValueError('Ubuntu22.04/24.04 required')
-    for p in ('/etc/v2ray-agent','/etc/xray-xhttp443','/etc/hy2-udp443','/opt/la-portal','/etc/la-portal','/usr/local/sbin/userm','/var/lib/xray-usage-v1/usage.db'):
+    for p in ('/etc/v2ray-agent','/etc/xray-xhttp443','/etc/hy2-udp443','/opt/la-portal','/etc/la-portal','/usr/local/sbin/userm','/usr/local/sbin/xrayupdate','/var/lib/xray-usage-v1/usage.db'):
         if pathlib.Path(p).exists() or pathlib.Path(p).is_symlink():raise ValueError('Fresh-server only; existing path: '+p)
     output=subprocess.check_output(['ss','-H','-lntu'],text=True)
     if managed_acme and re.search(r':80\s',output):
@@ -245,6 +247,7 @@ def install(c):
         command(['/usr/bin/python3','/opt/la-portal/self_test.py'])
         command(['systemctl','enable','--now','la-usage.timer'])
         if manifest['renew_enabled']:command(['systemctl','enable','--now','la-renew.timer'])
+        pathlib.Path('/usr/local/sbin/xrayupdate').symlink_to('/opt/la-portal/scripts/xrayupdate')
         # Email and monthly remain off until explicit acceptance via activate.
         record['status']='installed-awaiting-acceptance'
     except BaseException:
