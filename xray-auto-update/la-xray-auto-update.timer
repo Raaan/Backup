@@ -1,0 +1,9 @@
+[Unit]
+Description=Check LA Portal Xray for stable updates weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 20:30:00 UTC
+Unit=la-xray-auto-update.service
+
+[Install]
+WantedBy=timers.target
