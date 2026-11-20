@@ -22,8 +22,6 @@ bash install.sh
 
 Allow TCP 80, 443 and 8443, plus UDP 443; keep your SSH port accessible. Follow the installer prompts. Email is optional and configured separately.
 
-After installation, `userm` and `xrayupdate` are available as commands. Run `xrayupdate --check` to check versions or `xrayupdate` to apply a newer stable release manually.
-
 After verifying real client connections and traffic accounting, run `python3 portal.py activate --apply --clients-verified` from the installation directory.
 
 ## Current version
