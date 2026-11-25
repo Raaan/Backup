@@ -10,7 +10,7 @@ The repository provides a versioned backup of the project and makes future maint
 
 ## Installation
 
-Use a fresh Ubuntu 22.04 or 24.04 amd64 environment. Log in as root and run each command separately:
+Use a fresh Ubuntu amd64 environment. Ubuntu 26.04 compatibility has not yet been fully verified. Log in as root and run each command separately:
 
 ```bash
 apt-get update
@@ -27,7 +27,7 @@ After verifying real client connections and traffic accounting, run `python3 por
 
 ## 安装向导中文说明
 
-适用于全新 Ubuntu 22.04 / 24.04 amd64 VPS。安装前确保 TCP 80、443、8443 和 UDP 443 可从公网访问，并保留 SSH 端口。TCP 80 用于证书验证；安装程序不会自动修改防火墙。
+适用于全新 Ubuntu amd64 VPS。Ubuntu 26.04 的完整兼容性尚未验证。安装前确保 TCP 80、443、8443 和 UDP 443 可从公网访问，并保留 SSH 端口。TCP 80 用于证书验证；安装程序不会自动修改防火墙。
 
 逐条执行上面的安装命令。若 `git clone` 失败，请先解决错误，不要继续执行后续命令。向导中方括号内是默认值，直接按 Enter 使用默认值。
 
