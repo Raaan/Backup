@@ -178,7 +178,192 @@ def preflight(managed_acme=False):
     if sys.platform!='linux' or os.geteuid()!=0:raise ValueError('Install only on Linux as root')
     if platform.machine() not in ('x86_64','amd64'):raise ValueError('This release supports amd64 only')
     release=pathlib.Path('/etc/os-release').read_text()
-    if 'ID=ubuntu' not in release or not any(v in release for v in ('22.04','24.04')):raise ValueError('Ubuntu22.04/24.04 required')
+    if not re.search(r'^ID=["\']?ubuntu["\']?
+    for p in ('/etc/v2ray-agent','/etc/xray-xhttp443','/etc/hy2-udp443','/opt/la-portal','/etc/la-portal','/usr/local/sbin/userm','/usr/local/sbin/xrayupdate','/var/lib/xray-usage-v1/usage.db'):
+        if pathlib.Path(p).exists() or pathlib.Path(p).is_symlink():raise ValueError('Fresh-server only; existing path: '+p)
+    output=subprocess.check_output(['ss','-H','-lntu'],text=True)
+    if managed_acme and re.search(r':80\s',output):
+        raise ValueError('ACME standalone requires TCP80 free; do not stop existing web services blindly')
+    for line in output.splitlines():
+        if re.search(r':(?:8443|443|31305|10085|10086|10087)\s',line):raise ValueError('Required port occupied')
+
+def fetch_binaries(folder):
+    result={}
+    for name,(url,digest) in ARTIFACTS.items():
+        with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'LA-Portal/0.1'}),timeout=90) as response:
+            data=response.read(100_000_001)
+        if len(data)>100_000_000 or hashlib.sha256(data).hexdigest()!=digest:raise ValueError('Artifact hash mismatch: '+name)
+        if name=='xray':
+            import io
+            with zipfile.ZipFile(io.BytesIO(data)) as z:data=z.read('xray')
+        target=folder/name;target.write_bytes(data);target.chmod(0o755);result[name]=target
+    return result
+
+def validate_tls(c):
+    subprocess.run(['openssl','verify','-CAfile','/etc/ssl/certs/ca-certificates.crt','-untrusted',c['tls_cert'],c['tls_cert']],check=True,stdout=subprocess.DEVNULL)
+    subprocess.run(['openssl','x509','-in',c['tls_cert'],'-noout','-checkend','86400'],check=True,stdout=subprocess.DEVNULL)
+    try:ipaddress.ip_address(c['tls_name']);flag='-checkip'
+    except ValueError:flag='-checkhost'
+    subprocess.run(['openssl','x509','-in',c['tls_cert'],'-noout',flag,c['tls_name']],check=True,stdout=subprocess.DEVNULL)
+    cert=subprocess.check_output(['openssl','x509','-in',c['tls_cert'],'-pubkey','-noout'])
+    key=subprocess.check_output(['openssl','pkey','-in',c['tls_key'],'-pubout'])
+    if cert!=key:raise ValueError('Certificate/private key mismatch')
+
+def install(c):
+    managed = c.get('certificate',{}).get('mode') == 'acme'
+    preflight(managed)
+    command(['apt-get','update'])
+    command(['apt-get','install','-y','ca-certificates','python3','python3-openpyxl','openssl','iproute2','python3-venv','curl'])
+    from scripts.certificates import prepare
+    prepare(c)
+    validate_tls(c)
+    folder=pathlib.Path(tempfile.mkdtemp(prefix='la-portal-install-',dir='/root'));folder.chmod(0o700)
+    bins=fetch_binaries(folder)
+    tree=folder/'stage';manifest=stage(c,tree)
+    # Validate exact staged Xray configurations after substituting certificate paths.
+    xhttp=json.loads((tree/'etc/xray-xhttp443/current/config.json').read_text())
+    tls=xhttp['inbounds'][1]['streamSettings']['tlsSettings']['certificates'][0]
+    tls['certificateFile']=c['tls_cert'];tls['keyFile']=c['tls_key']
+    check=folder/'xhttp-check.json';check.write_text(json.dumps(xhttp));check.chmod(0o600)
+    command([str(bins['xray']),'run','-test','-confdir',str(tree/'etc/v2ray-agent/xray/conf')],stdout=subprocess.DEVNULL)
+    command([str(bins['xray']),'run','-test','-config',str(check)],stdout=subprocess.DEVNULL)
+    journal=pathlib.Path('/var/lib/la-portal/install.json');journal.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+    record={'status':'installing','stage':str(folder),'units':[u for u in UNITS if '/etc/systemd/system/'+u in manifest['files']],'files':manifest['files']}
+    journal.write_text(json.dumps(record));journal.chmod(0o600)
+    try:
+        for target,meta in manifest['files'].items():
+            p=pathlib.Path(target)
+            if p.exists():raise ValueError('Refusing to overwrite '+target)
+            p.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+            shutil.copyfile(tree/target.lstrip('/'),p);p.chmod(meta['mode'])
+        for src,target in ((bins['xray'],'/etc/v2ray-agent/xray/xray'),(bins['xray'],'/usr/local/lib/xray-xhttp443/xray'),(bins['hysteria'],'/usr/local/lib/hy2-udp443/hysteria')):
+            p=pathlib.Path(target);p.parent.mkdir(mode=0o755,parents=True,exist_ok=True);shutil.copyfile(src,p);p.chmod(0o755)
+        pathlib.Path('/var/lib/xray-usage-v1').mkdir(mode=0o700,parents=True,exist_ok=True)
+        pathlib.Path('/var/lib/userm').mkdir(mode=0o700,parents=True,exist_ok=True)
+        pathlib.Path('/usr/local/sbin/userm').symlink_to('/opt/vps-modules/userm/1.0.1/userm.py')
+        command(['systemctl','daemon-reload'])
+        for u in UNITS[:3]:command(['systemctl','enable','--now',u])
+        command(['/usr/bin/flock','/var/lock/xray-usage-v1.lock','/usr/bin/python3','/opt/la-portal/tick.py'])
+        command(['/usr/bin/python3','/opt/la-portal/self_test.py'])
+        command(['systemctl','enable','--now','la-usage.timer'])
+        if manifest['renew_enabled']:command(['systemctl','enable','--now','la-renew.timer'])
+        pathlib.Path('/usr/local/sbin/xrayupdate').symlink_to('/opt/la-portal/scripts/xrayupdate')
+        # Email and monthly remain off until explicit acceptance via activate.
+        record['status']='installed-awaiting-acceptance'
+    except BaseException:
+        for u in UNITS:subprocess.run(['systemctl','disable','--now',u],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        record['status']='failed-stopped-data-retained'
+        raise
+    finally:journal.write_text(json.dumps(record));journal.chmod(0o600)
+    print('Installed. Verify real clients and usage before activate. Private stage:',folder)
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('action',choices=['setup','mail-setup','mail-disable','mail-test','billing-show','billing-set','core-check','core-upgrade','core-rollback','self-test','plan','stage','install','status','activate','rollback'])
+    p.add_argument('--config');p.add_argument('--out');p.add_argument('--apply',action='store_true')
+    p.add_argument('--clients-verified',action='store_true')
+    p.add_argument('--day',type=int)
+    p.add_argument('--time',dest='billing_time')
+    p.add_argument('--timezone')
+    p.add_argument('--quota')
+    p.add_argument('--unit',choices=['GB','GiB'])
+    p.add_argument('--factor')
+    p.add_argument('--component',choices=['xray','hy2'])
+    p.add_argument('--version')
+    p.add_argument('--backup')
+    a=p.parse_args()
+    if a.action in ('core-check','core-upgrade','core-rollback'):
+        from scripts import core_update
+        if a.action=='core-check':
+            for component in ([a.component] if a.component else ['xray','hy2']):core_update.status(component)
+        else:
+            if not a.apply or sys.platform!='linux' or os.geteuid()!=0:p.error('Core changes require Linux root and --apply')
+            if a.action=='core-upgrade':
+                if not a.component or not a.version:p.error('Provide --component and explicit --version')
+                core_update.upgrade(a.component,a.version)
+            else:core_update.rollback(a.backup)
+    elif a.action in ('billing-show','billing-set'):
+        from modules.usage.v1_core.billing import load, normalize
+        c=load()
+        if a.action=='billing-show':print(json.dumps(c,indent=2))
+        else:
+            if not a.apply or sys.platform!='linux' or os.geteuid()!=0:p.error('billing-set requires Linux root and --apply')
+            updates={k:v for k,v in {'day':a.day,'time':a.billing_time,'timezone':a.timezone,'quota':a.quota,'unit':a.unit,'factor':a.factor}.items() if v is not None}
+            if not updates:p.error('Provide at least one billing setting')
+            from scripts.billing_update import apply_settings
+            apply_settings(normalize(dict(c,**updates)))
+    elif a.action=='self-test':
+        if not a.apply or sys.platform!='linux' or os.geteuid()!=0:p.error('self-test requires Linux root and --apply')
+        command(['/usr/bin/python3','/opt/la-portal/self_test.py'])
+    elif a.action=='setup':
+        from scripts.setup import configure
+        configure(a.config or '/root/private/la-portal.json')
+    elif a.action=='mail-setup':
+        if not a.apply or sys.platform!='linux' or os.geteuid()!=0:p.error('mail-setup requires Linux root and --apply')
+        from scripts.mail_setup import install as install_mail
+        import fcntl
+        with open('/var/lock/la-portal-mail.lock','a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX | fcntl.LOCK_NB)
+            install_mail(ROOT)
+    elif a.action=='mail-disable':
+        if not a.apply or sys.platform!='linux' or os.geteuid()!=0:p.error('mail-disable requires Linux root and --apply')
+        command(['systemctl','disable','--now','la-weekly.timer'])
+        command(['systemctl','stop','la-weekly.service'])
+        print('Mail scheduling stopped; settings, credentials and sent markers retained')
+    elif a.action=='mail-test':
+        if not a.apply or sys.platform!='linux' or os.geteuid()!=0:p.error('mail-test requires Linux root and --apply')
+        command(['/usr/bin/python3','/opt/la-portal/mail_test.py'])
+    elif a.action in ('plan','stage','install'):
+        c=read_config(a.config)
+        if a.action=='plan':
+            print('New Ubuntu amd64 only; REALITY TCP443 + XHTTP TCP8443 + HY2 UDP443 + userm + V1; no history; no Tunnel.')
+            print('Billing policy:',json.dumps(c['billing']))
+            print('Email configured:',bool(c.get('mail')),'monthly requested:',bool(c.get('enable_monthly')))
+            if c.get('certificate',{}).get('mode')=='acme':print('ACME standalone temporarily listens on TCP80; CA terms accepted; staging then production issuance.')
+            print('Managed ACME certificate:', c.get('certificate',{}).get('mode')=='acme')
+            print('Certificate renewal configured:',c.get('certificate',{}).get('mode')=='acme' or bool(c.get('certificate_renewal_command')))
+        elif a.action=='stage':
+            if c.get('certificate',{}).get('mode')=='acme':
+                raise ValueError('ACME issuance is an install action; stage only accepts preissued import certificates')
+            stage(c,a.out);print('Private staged files generated; no live paths modified')
+        else:
+            if not a.apply:p.error('install requires --apply')
+            import fcntl
+            with open('/var/lock/la-portal-install.lock','a') as lock:
+                fcntl.flock(lock,fcntl.LOCK_EX | fcntl.LOCK_NB)
+                install(c)
+    elif a.action=='status':
+        subprocess.run(['systemctl','is-active',*UNITS])
+        if pathlib.Path('/var/lib/xray-usage-v1/usage.db').exists():
+            with sqlite3.connect('file:/var/lib/xray-usage-v1/usage.db?mode=ro',uri=True) as db:
+                print('Integrity:',db.execute('PRAGMA integrity_check').fetchone()[0])
+                print('FK errors:',len(db.execute('PRAGMA foreign_key_check').fetchall()))
+                print('Last sample:',db.execute("SELECT value FROM v1_live_meta WHERE key='last_state_at'").fetchone())
+    else:
+        if not a.apply or sys.platform!='linux' or os.geteuid()!=0:p.error('Requires Linux root and --apply')
+        j=pathlib.Path('/var/lib/la-portal/install.json');record=json.loads(j.read_text())
+        if a.action=='rollback':
+            if pathlib.Path('/etc/systemd/system/la-weekly.timer').exists():
+                command(['systemctl','disable','--now','la-weekly.timer'])
+                command(['systemctl','stop','la-weekly.service'])
+            for u in record['units']:subprocess.run(['systemctl','disable','--now',u],check=True)
+            record['status']='stopped-data-retained';j.write_text(json.dumps(record))
+            print('Stopped installed units. Configurations, credentials and data retained. Packages not removed.')
+        else:
+            if not a.clients_verified:p.error('activate requires --clients-verified after real client checks')
+            if record['status']!='installed-awaiting-acceptance':raise ValueError('Unexpected installation status')
+            manifest=json.loads((pathlib.Path(record['stage'])/'stage/manifest.json').read_text())
+            # Admission requires an actual successful collection, not only active processes.
+            for unit in UNITS[:3]:command(['systemctl','is-active','--quiet',unit])
+            command(['systemctl','start','la-usage.service'])
+            if manifest['monthly_enabled']:
+                command(['/usr/bin/python3','/root/xray-v1-monthly-v2.py','--check'])
+                command(['systemctl','enable','--now','la-monthly.timer'])
+            record['status']='accepted';j.write_text(json.dumps(record))
+            print('Accepted; requested monthly timer enabled. Mail is installed independently. Natural cycle still unverified.')
+
+if __name__=='__main__':main()
+, release, re.MULTILINE):raise ValueError('Ubuntu required')
     for p in ('/etc/v2ray-agent','/etc/xray-xhttp443','/etc/hy2-udp443','/opt/la-portal','/etc/la-portal','/usr/local/sbin/userm','/usr/local/sbin/xrayupdate','/var/lib/xray-usage-v1/usage.db'):
         if pathlib.Path(p).exists() or pathlib.Path(p).is_symlink():raise ValueError('Fresh-server only; existing path: '+p)
     output=subprocess.check_output(['ss','-H','-lntu'],text=True)
