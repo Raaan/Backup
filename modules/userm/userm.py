@@ -341,6 +341,29 @@ def choose(count, prompt='选择（0 返回）：'):
     return int(value)-1
 
 
+def plan_sni(endpoint, hostname, settings):
+    hostname = hostname.lower().strip()
+    if len(hostname) > 253 or not re.fullmatch(r'(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', hostname):
+        raise ValueError('请输入有效域名，不含端口或协议')
+    inbound = endpoint['inbound']
+    if inbound.get('streamSettings', {}).get('security') != 'reality':
+        raise ValueError('仅支持 REALITY 入站')
+    key = endpoint['adapter'].unit+':'+str(inbound.get('tag', ''))
+    if 'sni' in settings.get('endpoints', {}).get(key, {}):
+        raise RuntimeError('此入站存在链接 SNI 覆盖设置，请先移除后重试')
+    path = endpoint['path'].resolve()
+    if path != endpoint['resolved']: raise RuntimeError('配置链接已切换；请重新扫描')
+    original = path.read_bytes()
+    if sha(original) != endpoint['digest']: raise RuntimeError('配置已变化；请重新扫描')
+    data = json.loads(original)
+    reality = data['inbounds'][endpoint['index']]['streamSettings']['realitySettings']
+    reality['serverNames'] = [hostname]
+    if 'dest' in reality and 'target' in reality:
+        raise ValueError('配置同时包含 dest 和 target，需人工检查')
+    reality['dest' if 'dest' in reality else 'target'] = hostname + ':443'
+    return [endpoint], {path: original}, {path: encoded(data)}
+
+
 def display_users(endpoint, settings):
     for client in users(endpoint):
         print(client['email'])
@@ -359,11 +382,21 @@ def menu():
             selected = choose(len(visible), '选择服务（0 退出）：')
             if selected is None: return
             endpoint = visible[selected]
-            print('\n'+title(endpoint)+'\n1 查看用户（全部连接）\n2 增加用户\n3 管理（删除用户）')
-            action = choose(3)
+            print('\n'+title(endpoint)+'\n1 查看用户（全部连接）\n2 增加用户\n3 管理（删除用户）\n4 修改 REALITY SNI')
+            action = choose(4)
             if action is None: continue
             settings = load(SETTINGS) if SETTINGS.exists() else {}
             clients = users(endpoint)
+            if action == 3:
+                reality = endpoint['inbound'].get('streamSettings', {}).get('realitySettings', {})
+                print('当前 SNI：'+', '.join(reality.get('serverNames', [])))
+                hostname = input('新 REALITY 目标域名（不含端口）：').strip()
+                group, original, changes = plan_sni(endpoint, hostname, settings)
+                print('将同时更新 SNI 和目标地址为 '+hostname+':443，并重启 '+endpoint['adapter'].unit)
+                print('旧客户端需更新 SNI；请确保新目标支持 REALITY。')
+                if input('输入 APPLY 确认，其他输入取消：').strip() == 'APPLY':
+                    transaction(group, original, changes)
+                continue
             if action == 0:
                 display_users(endpoint, settings)
                 continue
@@ -417,3 +450,5 @@ def main():
 if __name__ == '__main__':
     try: main()
     except (EOFError, KeyboardInterrupt): print('\n已退出。')
+
+
